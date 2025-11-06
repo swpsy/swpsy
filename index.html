@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>黑暗人格测评（演示）</title>
+  <style>
+    :root{--accent:#c0392b;--muted:#666;--card:#fff}
+    body{font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial; background:#f5f7fb; color:#222; margin:0; padding:20px;}
+    .wrap{max-width:900px;margin:18px auto;}
+    header{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+    h1{margin:0;font-size:20px}
+    p.lead{margin:0;color:var(--muted)}
+    .card{background:var(--card);padding:18px;border-radius:10px;box-shadow:0 6px 18px rgba(12,20,40,0.06);margin-bottom:16px;}
+    .q{margin-bottom:12px}
+    .q .txt{margin-bottom:6px}
+    .choices{display:flex;gap:8px;flex-wrap:wrap}
+    .choice{flex:1;min-width:48px;text-align:center;padding:8px;border-radius:8px;background:#f0f4fb;border:1px solid #e6eefc;cursor:pointer}
+    .choice.selected{background:var(--accent);color:white;border-color:var(--accent)}
+    .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    button{background:var(--accent);color:#fff;border:none;padding:10px 14px;border-radius:8px;cursor:pointer}
+    button.secondary{background:#2d6cdf}
+    .small{font-size:13px;color:var(--muted)}
+    .result-title{font-size:18px;margin:0 0 8px 0}
+    .metric{display:flex;align-items:center;gap:12px}
+    canvas{max-width:100%}
+    .badge{background:#eee;padding:6px 10px;border-radius:999px;color:#333;font-weight:600}
+    footer{margin-top:12px;color:var(--muted);font-size:13px}
+    .note{font-size:13px;color:#666;margin-top:8px}
+    @media (max-width:600px){
+      .choices{gap:6px}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div style="width:56px;height:56px;border-radius:10px;background:linear-gradient(135deg,#fceae9,#ffd6d6);display:flex;align-items:center;justify-content:center;font-weight:700;color:#7a0b0b">DF</div>
+      <div>
+        <h1>黑暗人格自测（演示）</h1>
+        <p class="lead">示例页面 — 填完题后会给出得分、百分位，并把你的分数在常模分布中标出。</p>
+      </div>
+    </header>
+
+    <div id="quiz" class="card">
+      <div id="questions"></div>
+      <div class="btns">
+        <button id="prevBtn" style="display:none">上一步</button>
+        <button id="nextBtn">下一题</button>
+        <button id="submitBtn" style="display:none">查看结果</button>
+      </div>
+      <p class="note">每题 1（非常不同意）—5（非常同意）。此为示例题，请替换为你有权使用的题目并补充常模来源。</p>
+    </div>
+
+    <div id="result" class="card" style="display:none">
+      <h2 class="result-title">测评结果</h2>
+      <div class="metric">
+        <div>
+          <div style="font-size:28px;font-weight:700" id="totalScore">—</div>
+          <div class="small">总分（示例：12 道题，得分范围 12–60）</div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <div class="badge" id="percentileBadge">—</div>
+          <div class="small">百分位（超越多少%的人）</div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <canvas id="distChart" width="800" height="250"></canvas>
+      </div>
+
+      <div style="margin-top:12px">
+        <h3 style="margin:6px 0">分量表（示例：马基雅维利 / 自恋 / 心理病态）</h3>
+        <div id="subscales" class="small"></div>
+      </div>
+
+      <div style="margin-top:12px" class="btns">
+        <button id="downloadBtn">下载报告（PDF）</button>
+        <button class="secondary" id="restartBtn">重新测评</button>
+      </div>
+
+      <p class="note">免责声明：本测验仅用于自我探索，不等同于临床诊断。如有严重困扰，请咨询专业心理医生/咨询师。</p>
+    </div>
+
+    <footer class="small">
+      提示：你可以把此文件上传到 Vercel/Netlify 或直接放到自己服务器进行托管。上线前请替换题目与常模数据并补充隐私与授权说明。
+    </footer>
+  </div>
+
+  <!-- 依赖库 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+  <script>
+  /*********************************************************************
+   * 示例题库（请上线前替换为你有权使用的题目）
+   * 每题属于一个子量表：mach (马基雅维利)、narc (自恋)、psy (心理病态)
+   * 量表采用 1-5 Likert，得分直接相加
+   *********************************************************************/
+  const QUESTIONS = [
+    {id:1, text:"为了个人目标，我会在必要时策略性隐藏真实想法。", sub:"mach"},
+    {id:2, text:"我享受在社交中收获他人的关注与赞美。", sub:"narc"},
+    {id:3, text:"在压力下，我有时会做出冷漠的决定。", sub:"psy"},
+    {id:4, text:"即便违背规则，只要能带来好处我也会去做。", sub:"mach"},
+    {id:5, text:"我经常觉得自己比大多数人更特别。", sub:"narc"},
+    {id:6, text:"当别人需要帮助时，我会优先考虑是否值得。", sub:"psy"},
+    {id:7, text:"我会为了操控局面而有意模糊事实。", sub:"mach"},
+    {id:8, text:"我在社交场合常常感到别人应该关注我。", sub:"narc"},
+    {id:9, text:"有时我对别人的痛苦感到麻木。", sub:"psy"},
+    {id:10, text:"利用人际关系达到目的让我感到满意。", sub:"mach"},
+    {id:11, text:"我会夸大自己的能力以取得优势。", sub:"narc"},
+    {id:12, text:"我倾向于冲动且不顾后果的行为。", sub:"psy"}
+  ];
+
+  // ---------- 示例常模数据（模拟） ----------
+  // 下面 norms 是模拟的样本总分分布（12题，每题1-5，分数范围 12-60）
+  // 上线请替换为真实常模（文章或你自己的大样本），并在报告中标注来源
+  const NORMS = (function genNorms(){
+    // 生成 1000 个正态样本并裁剪到 12-60 之间：仅用于演示
+    const out = [];
+    for(let i=0;i<1000;i++){
+      let v = Math.round( Math.min(60, Math.max(12, 36 + 8 * (randNormal())) ) );
+      out.push(v);
+    }
+    out.sort((a,b)=>a-b);
+    return out;
+    function randNormal(){
+      // Box-Muller
+      let u=0,v=0; while(u===0) u=Math.random();
+      while(v===0) v=Math.random();
+      return Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);
+    }
+  })();
+
+  // ---- 状态与呈现 ----
+  let answers = {}; // id -> 1..5
+  let curIndex = 0;
+
+  const questionsDiv = document.getElementById('questions');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const submitBtn = document.getElementById('submitBtn');
+
+  function renderQuestion(index){
+    const q = QUESTIONS[index];
+    questionsDiv.innerHTML = `
+      <div class="q">
+        <div class="txt"><strong>第 ${index+1} / ${QUESTIONS.length}</strong> &nbsp; ${q.text}</div>
+        <div class="choices" id="choices-${q.id}">
+          ${[1,2,3,4,5].map(n=>`<div class="choice" data-val="${n}">${n}</div>`).join('')}
+        </div>
+      </div>
+    `;
+    // restore selection if exists
+    const selected = answers[q.id];
+    if(selected){
+      const nodes = document.querySelectorAll(`#choices-${q.id} .choice`);
+      nodes.forEach(node => {
+        if(Number(node.dataset.val) === selected) node.classList.add('selected');
+      });
+    }
+    // attach handlers
+    document.querySelectorAll(`#choices-${q.id} .choice`).forEach(el=>{
+      el.addEventListener('click', ()=> {
+        document.querySelectorAll(`#choices-${q.id} .choice`).forEach(x=>x.classList.remove('selected'));
+        el.classList.add('selected');
+        answers[q.id] = Number(el.dataset.val);
+      });
+    });
+
+    // buttons visibility
+    prevBtn.style.display = index===0 ? 'none' : 'inline-block';
+    nextBtn.style.display = index===QUESTIONS.length-1 ? 'none' : 'inline-block';
+    submitBtn.style.display = index===QUESTIONS.length-1 ? 'inline-block' : 'none';
+  }
+
+  prevBtn.addEventListener('click', ()=>{
+    if(curIndex>0){ curIndex--; renderQuestion(curIndex); window.scrollTo({top:0,behavior:'smooth'}) }
+  });
+  nextBtn.addEventListener('click', ()=>{
+    if(!answers[QUESTIONS[curIndex].id]){
+      alert('请先选择你的回答（1-5）后再继续。'); return;
+    }
+    if(curIndex<QUESTIONS.length-1){ curIndex++; renderQuestion(curIndex); window.scrollTo({top:0,behavior:'smooth'}) }
+  });
+
+  submitBtn.addEventListener('click', ()=>{
+    // 简单验证
+    for(const q of QUESTIONS){
+      if(!answers[q.id]){ alert('请完成所有题目后提交。'); return; }
+    }
+    showResult();
+  });
+
+  function showResult(){
+    document.getElementById('quiz').style.display='none';
+    document.getElementById('result').style.display='block';
+
+    // 计算总分 & 子量表得分
+    const totals = {total:0, mach:0, narc:0, psy:0};
+    for(const q of QUESTIONS){
+      const v = answers[q.id] || 0;
+      totals.total += v;
+      totals[q.sub] += v;
+    }
+    document.getElementById('totalScore').innerText = totals.total;
+    // 百分位计算：使用 norms 数组（中位秩法）
+    const perc = percentileFromNorms(totals.total, NORMS);
+    document.getElementById('percentileBadge').innerText = `高于 ${perc.toFixed(0)}% 的人`;
+
+    // 子量表展示
+    const subdiv = document.getElementById('subscales');
+    subdiv.innerHTML = `
+      马基雅维利（Machiavellianism）：${totals.mach} <br>
+      自恋（Narcissism）：${totals.narc} <br>
+      心理病态（Psychopathy）：${totals.psy}
+    `;
+
+    // 绘图：用 Chart.js 显示常模直方图 + 用户分数竖线
+    drawDistributionChart(NORMS, totals.total);
+  }
+
+  // ------------- 百分位函数（基于样本 norms） -------------
+  function percentileFromNorms(score, norms){
+    // norms 必须已排序 ascending
+    const n = norms.length;
+    if(n===0) return 0;
+    // count less than and equal
+    let less=0, equal=0;
+    for(let i=0;i<n;i++){
+      if(norms[i] < score) less++;
+      else if(norms[i]===score) equal++;
+      else break;
+    }
+    const p = (less + 0.5 * equal) / n;
+    return p * 100;
+  }
+
+  // ------------- 分布图（直方图） -------------
+  let chartInstance = null;
+  function drawDistributionChart(norms, userScore){
+    // compute histogram bins
+    const min = Math.min(...norms, userScore);
+    const max = Math.max(...norms, userScore);
+    const bins = 12;
+    const binWidth = (max - min) / bins;
+    const labels = [];
+    const counts = new Array(bins).fill(0);
+    for(let i=0;i<bins;i++){
+      const a = Math.round(min + i*binWidth);
+      const b = Math.round(min + (i+1)*binWidth);
+      labels.push(`${a}–${b}`);
+    }
+    for(const v of norms){
+      let idx = Math.floor((v - min) / (max - min + 1e-9) * bins);
+      if(idx<0) idx=0; if(idx>=bins) idx=bins-1;
+      counts[idx]++;
+    }
+    // find x-position for user (approximate bin center)
+    const userX = userScore;
+
+    // destroy old chart if exists
+    if(chartInstance){ chartInstance.destroy(); chartInstance = null; }
+
+    const ctx = document.getElementById('distChart').getContext('2d');
+    chartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: '常模分布（样本频数）', data: counts, borderRadius:6 }
+        ]
+      },
+      options: {
+        plugins: {
+          legend: { display:false },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y}` } }
+        },
+        scales: {
+          x: { title: { display:false } },
+          y: { title: { display: false } }
+        },
+        // add vertical line via plugin
+        animation:false,
+        responsive:true,
+        maintainAspectRatio:false
+      },
+      plugins: [{
+        id: 'userLine',
+        afterDraw(chart){
+          const xScale = chart.scales.x;
+          const yScale = chart.scales.y;
+          // compute pixel x for user score (interpolate)
+          const chartArea = chart.chartArea;
+          // Compute proportion of userScore between min and max
+          const proportion = (userX - min) / (max - min + 1e-9);
+          const pixelX = chartArea.left + proportion * (chartArea.right - chartArea.left);
+          const ctx2 = chart.ctx;
+          ctx2.save();
+          ctx2.beginPath();
+          ctx2.moveTo(pixelX, chartArea.top);
+          ctx2.lineTo(pixelX, chartArea.bottom);
+          ctx2.lineWidth = 2;
+          ctx2.strokeStyle = '#c0392b';
+          ctx2.stroke();
+          ctx2.fillStyle = '#c0392b';
+          ctx2.font = '13px sans-serif';
+          ctx2.fillText(`你的分数 ${userX}`, pixelX + 6, chartArea.top + 14);
+          ctx2.restore();
+        }
+      }]
+    });
+  }
+
+  // ------------- 下载 PDF（把结果区转成图片再写入pdf） -------------
+  const downloadBtn = document.getElementById('downloadBtn');
+  downloadBtn.addEventListener('click', async ()=>{
+    const resultNode = document.getElementById('result');
+    // temporarily increase width for better screenshot
+    const oldWidth = resultNode.style.width;
+    resultNode.style.width = '900px';
+    const canvas = await html2canvas(resultNode, {scale:2, useCORS:true});
+    resultNode.style.width = oldWidth;
+    const imgData = canvas.toDataURL('image/png');
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'px', format: [canvas.width, canvas.height] });
+    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    pdf.save('dark-personality-report.pdf');
+  });
+
+  // ------------- 重新测评 -------------
+  document.getElementById('restartBtn').addEventListener('click', ()=>{
+    // reset
+    answers = {}; curIndex=0;
+    document.getElementById('result').style.display='none';
+    document.getElementById('quiz').style.display='block';
+    renderQuestion(0);
+    window.scrollTo({top:0,behavior:'smooth'});
+  });
+
+  // ------ 初始化渲染第一题 ------
+  renderQuestion(0);
+
+  </script>
+</body>
+</html>
